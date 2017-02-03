@@ -3,6 +3,7 @@ package utils
 import (
 	"fmt"
 	"net"
+	"os"
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/containernetworking/cni/pkg/ip"
@@ -10,10 +11,11 @@ import (
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/vishvananda/netlink"
+	"github.com/projectcalico/libcalico-go/lib/api"
 )
 
 // DoNetworking performs the networking for the given config and IPAM result
-func DoNetworking(args *skel.CmdArgs, conf NetConf, res *types.Result, logger *log.Entry, desiredVethName string) (hostVethName, contVethMAC string, err error) {
+func DoNetworking(args *skel.CmdArgs, conf NetConf, res *types.Result, logger *log.Entry, desiredVethName string, endpoint *api.WorkloadEndpoint) (hostVethName, contVethMAC string, err error) {
 	// Select the first 11 characters of the containerID for the host veth.
 	hostVethName = "cali" + args.ContainerID[:min(11, len(args.ContainerID))]
 	contVethName := args.IfName
@@ -75,6 +77,16 @@ func DoNetworking(args *skel.CmdArgs, conf NetConf, res *types.Result, logger *l
 
 			if err = netlink.AddrAdd(contVeth, &netlink.Addr{IPNet: &res.IP4.IP}); err != nil {
 				return fmt.Errorf("failed to add IP addr to %q: %v", contVethName, err)
+			}
+
+			anycast_ip := endpoint.Metadata.Labels["anycast_ip"]
+			if anycast_ip != "" {
+				anycast_ip := anycast_ip + "/32"
+				aip, _ := netlink.ParseAddr(anycast_ip)
+				fmt.Fprintf(os.Stderr, "Adding anycast IP to pod: %s\n", anycast_ip)
+				if err = netlink.AddrAdd(contVeth, aip); err != nil {
+					return fmt.Errorf("failed to add anycast IP addr to %q: %v", contVethName, err)
+				}
 			}
 		}
 
